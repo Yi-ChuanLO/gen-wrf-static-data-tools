@@ -4,9 +4,11 @@ from subprocess import run
 from pathlib    import Path
 from urllib     import request
 import shutil
+import zipfile
 import os
 
 NOAAS3 = 'https://noaa-nws-global-pds.s3.amazonaws.com/fix/sfc_climo/20230925'
+GMTED  = 'https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/topo/downloads/GMTED/Grid_ZipFiles'
 dstdir = './ufs_static'
 
 def clean(prefix:str):
@@ -16,9 +18,17 @@ def clean(prefix:str):
 def checkdata(dataname:str):
     if not Path(f'{dstdir}/{dataname}').exists():
         try:
-            print(f'{dstdir}/{dataname} not exist, download it from NOAA s3')
-            with request.urlopen(f'{NOAAS3}/{dataname}') as response, open(f'{dstdir}/{dataname}', 'wb') as out_file:
-                shutil.copyfileobj(response, out_file)
+            if dataname == 'mn15_grd' or dataname == 'mn75_grd':
+                print(f'{dstdir}/{dataname} not exist, download it from GMTED website')
+                with request.urlopen(f'{GMTED}/{dataname}.zip') as response, open(f'{dstdir}/{dataname}.zip', 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
+
+                with zipfile.ZipFile(f'{dstdir}/{dataname}.zip','r') as zip_ref:
+                    zip_ref.extractall(dstdir)
+            else:
+                print(f'{dstdir}/{dataname} not exist, download it from NOAA s3')
+                with request.urlopen(f'{NOAAS3}/{dataname}') as response, open(f'{dstdir}/{dataname}', 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
             print(f"File downloaded successfully and saved to {dstdir}/{dataname}")
         except urllib.error.HTTPError as e:
             print(f"HTTP Error: {e.code} - {e.reason}")
@@ -319,6 +329,108 @@ description="Monthly MODIS surface albedo"'''
     with open(f'{prefix}/index', 'w') as f:
         f.write(index)
 
+def gen_gmted_15s_data(prefix:str):
+    dataname     = 'mn15_grd'
+    nlats, nlons = 33600, 86400
+    ytile, xtile = 1200, 1200
+
+    checkdata(dataname)
+
+    os.makedirs(prefix, exist_ok=True)
+
+    for jj in range(0, nlats, ytile):
+        for ii in range(0, nlons, xtile):
+            run([
+                'gdal_translate',
+                '-of', 'ENVI',
+                '-ot', 'Int16',
+                '-srcwin', str(ii), str(jj), str(xtile), str(ytile),
+                f'{dstdir}/{dataname}',
+                '{prefix}/{xs:05d}-{xe:05d}.{ys:05d}-{ye:05d}'.format(
+                    prefix=prefix,
+                    xs=ii+1, xe=ii+xtile,
+                    ys=jj+1, ye=jj+ytile,
+                )
+            ])
+
+    clean(prefix)
+
+    index = f'''type=continuous
+projection=regular_ll
+dx=0.004166666666667
+dy=-0.004166666666667
+known_x=1.0
+known_y=1.0
+known_lat=83.9977777778
+known_lon=-179.998055556
+wordsize=2
+missing_value=-32768
+tile_x=1200
+tile_y=1200
+tile_z=1
+signed=yes
+endian=little
+units="meters MSL"
+description="GMTED2010 15-arc-second topography height"'''
+
+    with open(f'{prefix}/index', 'w') as f:
+        f.write(index)
+
+def gen_gmted_7p5s_data(prefix:str):
+    dataname     = 'mn75_grd'
+    nlats, nlons = 67200, 172800
+    ytile, xtile = 1200, 1200
+
+    checkdata(dataname)
+
+    os.makedirs(prefix, exist_ok=True)
+
+    nlons_mid = int(nlons/2)
+
+    for ils, ile in zip([0, nlons_mid], [nlons_mid, nlons]):
+        if ils == 0: childdir = f'{prefix}/-180deg_0deg'
+        else:        childdir = f'{prefix}/0deg_180deg'
+        os.makedirs(childdir, exist_ok=True)
+
+        for jj in range(0, nlats, ytile):
+            for ii in range(ils, ile, xtile):
+                run([
+                    'gdal_translate',
+                    '-of', 'ENVI',
+                    '-ot', 'Int16',
+                    '-srcwin', str(ii), str(jj), str(xtile), str(ytile),
+                    f'{dstdir}/{dataname}',
+                    '{prefix}/{xs:05d}-{xe:05d}.{ys:05d}-{ye:05d}'.format(
+                        prefix=childdir,
+                        xs=ii+1-ils, xe=ii+xtile-ils,
+                        ys=jj+1,     ye=jj+ytile,
+                    )
+                ])
+
+        clean(childdir)
+
+        index = f'''type=continuous
+projection=regular_ll
+dx=0.002083333333333
+dy=-0.002083333333333
+known_x=1.0
+known_y=1.0
+known_lat=83.9988194333
+known_lon={-179.999097233 + 0.002083333333333 * ils}
+wordsize=2
+missing_value=-32768
+tile_x=1200
+tile_y=1200
+tile_z=1
+signed=yes
+endian=little
+units="meters MSL"
+description="GMTED2010 7.5-arc-second topography height"'''
+
+        with open(f'{childdir}/index', 'w') as f:
+            f.write(index)
+
+
 
 if __name__ == '__main__':
     os.makedirs(dstdir, exist_ok=True)
@@ -327,5 +439,7 @@ if __name__ == '__main__':
     gen_ufs_bnu_30s_data(f'{prefix}/ufs_bnu_soiltype_30s/')
     gen_ufs_statsgo_30s_data(f'{prefix}/ufs_statsgo_soiltype_30s/')
     gen_ufs_maxsnowalb_0p05deg_data(f'{prefix}/ufs_maxsnowalb/')
-    gen_ufs_snowfreealb_0p05deg_data(f'{prefix}/ufs_snowfreealb/')
+   #gen_ufs_snowfreealb_0p05deg_data(f'{prefix}/ufs_snowfreealb/')
     gen_ufs_lai_30s_data(f'{prefix}/ufs_lai_pnnl_30s/')
+    gen_gmted_15s_data(f'{prefix}/topo_gmted2010_15s/')
+    gen_gmted_7p5s_data(f'{prefix}/topo_gmted2010_7p5s/')
