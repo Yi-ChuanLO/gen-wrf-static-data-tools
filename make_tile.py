@@ -9,6 +9,8 @@ import os
 
 NOAAS3 = 'https://noaa-nws-global-pds.s3.amazonaws.com/fix/sfc_climo/20230925'
 GMTED  = 'https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/topo/downloads/GMTED/Grid_ZipFiles'
+VIIRS_AST = 'https://www.ncei.noaa.gov/data/viirs-annual-surface-type/archive/'
+
 dstdir = './ufs_static'
 
 def clean(prefix:str):
@@ -25,6 +27,10 @@ def checkdata(dataname:str):
 
                 with zipfile.ZipFile(f'{dstdir}/{dataname}.zip','r') as zip_ref:
                     zip_ref.extractall(dstdir)
+            elif 'VIIRS' in dataname:
+                print(f'{dstdir}/{dataname} not exist, download it from NCEI website')
+                with request.urlopen(f'{VIIRS_AST}/{dataname}') as response, open(f'{dstdir}/{dataname}', 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
             else:
                 print(f'{dstdir}/{dataname} not exist, download it from NOAA s3')
                 with request.urlopen(f'{NOAAS3}/{dataname}') as response, open(f'{dstdir}/{dataname}', 'wb') as out_file:
@@ -81,7 +87,55 @@ tile_x={xtile}
 tile_y={ytile}
 tile_z=1
 units="category"
-description="Noah-modified 20-category IGBP-MODIS landuse"
+description="Noah-modified 20-category IGBP-VIIRS landuse"
+mminlu="MODIFIED_IGBP_MODIS_NOAH"
+iswater=17
+isice=15
+isurban=13'''
+
+
+def gen_ncei_viirs_30s_data(prefix:str):
+    dataname     = 'VIIRS-AST-EMC20-GEO_v1r0_multi_s20210101_e20211231_c20220831.nc'
+    nlats, nlons = 21600, 43200
+    ytile, xtile = 1200, 1200
+
+    checkdata(dataname)
+
+    os.makedirs(prefix, exist_ok=True)
+
+    for jj in range(0, nlats, ytile):
+        for ii in range(0, nlons, xtile):
+            run([
+                'gdal_translate',
+                '-of', 'ENVI',
+                '-ot', 'Byte',
+                '-srcwin', str(ii), str(jj), str(xtile), str(ytile),
+                f'{dstdir}/{dataname}',
+                '{prefix}/{xs:05d}-{xe:05d}.{ys:05d}-{ye:05d}'.format(
+                    prefix=prefix,
+                    xs=ii+1, xe=ii+xtile,
+                    ys=jj+1, ye=jj+ytile,
+                )
+            ])
+
+    clean(prefix)
+
+    index = f'''type=categorical
+category_min=1
+category_max=20
+projection=regular_ll
+dx=0.00833333
+dy=-0.00833333
+known_x=1.0
+known_y=1.0
+known_lat=89.99583
+known_lon=-179.99583
+wordsize=1
+tile_x={xtile}
+tile_y={ytile}
+tile_z=1
+units="category"
+description="Noah-modified 20-category IGBP-VIIRS landuse"
 mminlu="MODIFIED_IGBP_MODIS_NOAH"
 iswater=17
 isice=15
@@ -365,8 +419,8 @@ known_lat=83.9977777778
 known_lon=-179.998055556
 wordsize=2
 missing_value=-32768
-tile_x=1200
-tile_y=1200
+tile_x={xtile}
+tile_y={ytile}
 tile_z=1
 signed=yes
 endian=little
@@ -419,8 +473,8 @@ known_lat=83.9988194333
 known_lon={-179.999097233 + 0.002083333333333 * ils}
 wordsize=2
 missing_value=-32768
-tile_x=1200
-tile_y=1200
+tile_x={xtile}
+tile_y={ytile}
 tile_z=1
 signed=yes
 endian=little
@@ -435,11 +489,12 @@ description="GMTED2010 7.5-arc-second topography height"'''
 if __name__ == '__main__':
     os.makedirs(dstdir, exist_ok=True)
     prefix = '/test'
-    gen_ufs_viirs_30s_data(f'{prefix}/ufs_viirs_landuse_20class_30s/')
-    gen_ufs_bnu_30s_data(f'{prefix}/ufs_bnu_soiltype_30s/')
-    gen_ufs_statsgo_30s_data(f'{prefix}/ufs_statsgo_soiltype_30s/')
-    gen_ufs_maxsnowalb_0p05deg_data(f'{prefix}/ufs_maxsnowalb/')
+    gen_ncei_viirs_30s_data(f'{prefix}/ncei_viirs_landuse_20class_30s/')
+   #gen_ufs_viirs_30s_data(f'{prefix}/ufs_viirs_landuse_20class_30s/')
+   #gen_ufs_bnu_30s_data(f'{prefix}/ufs_bnu_soiltype_30s/')
+   #gen_ufs_statsgo_30s_data(f'{prefix}/ufs_statsgo_soiltype_30s/')
+   #gen_ufs_maxsnowalb_0p05deg_data(f'{prefix}/ufs_maxsnowalb/')
    #gen_ufs_snowfreealb_0p05deg_data(f'{prefix}/ufs_snowfreealb/')
-    gen_ufs_lai_30s_data(f'{prefix}/ufs_lai_pnnl_30s/')
-    gen_gmted_15s_data(f'{prefix}/topo_gmted2010_15s/')
-    gen_gmted_7p5s_data(f'{prefix}/topo_gmted2010_7p5s/')
+   #gen_ufs_lai_30s_data(f'{prefix}/ufs_lai_pnnl_30s/')
+   #gen_gmted_15s_data(f'{prefix}/topo_gmted2010_15s/')
+   #gen_gmted_7p5s_data(f'{prefix}/topo_gmted2010_7p5s/')
